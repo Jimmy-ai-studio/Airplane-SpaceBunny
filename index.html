@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1b1f3b">
+<title>云端客机 · 飞行挑战</title>
+<!-- 内联 SVG 图标：避免浏览器请求 favicon.ico 产生 404 -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231b1f3b'/%3E%3Cpath d='M16 5l2 9 9 3-9 2-2 8-2-8-9-2 9-3z' fill='%23ffc93c'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./styles.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js",
+    "three/": "./vendor/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+
+<div id="app">
+  <canvas id="scene"></canvas>
+
+  <!-- ================= HUD 根容器（不拦截鼠标） ================= -->
+  <div id="hud">
+
+    <!-- ---------- 顶部 KPI 面板 ---------- -->
+    <div id="topbar" class="panel">
+      <div class="kpi-row">
+        <div class="kpi">
+          <span class="kpi-label">飞行阶段</span>
+          <span id="phase-label" class="kpi-value">待起飞</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-label">已用时间</span>
+          <span id="timer" class="kpi-value mono">00:00.0</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-label">航路进度</span>
+          <ul id="cp-list" class="cp-list"></ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- 右上角飞行数据条 ---------- -->
+    <div id="databar" class="panel">
+      <div class="data-cell">
+        <span class="data-label">速度</span>
+        <span class="data-value mono"><span id="speed-val">0</span><i class="unit">km/h</i></span>
+      </div>
+      <div class="data-cell">
+        <span class="data-label">高度</span>
+        <span class="data-value mono"><span id="alt-val">0</span><i class="unit">m</i></span>
+      </div>
+      <div class="data-cell">
+        <span class="data-label">升降率</span>
+        <span class="data-value mono"><span id="vs-val">+0.0</span><i class="unit">m/s</i></span>
+      </div>
+      <div class="data-cell">
+        <span class="data-label">航向</span>
+        <span class="data-value mono"><span id="heading-val">000</span><i class="unit">°</i></span>
+      </div>
+    </div>
+
+    <!-- ---------- 左下：姿态仪 ---------- -->
+    <div id="attitude-box" class="panel">
+      <canvas id="attitude" width="260" height="260"></canvas>
+      <div class="attitude-cap">姿态仪（人工地平仪）</div>
+    </div>
+
+    <!-- ---------- 右下：油门 ---------- -->
+    <div id="throttle-box" class="panel">
+      <div class="throttle-head">
+        <span class="data-label">油门</span>
+        <span class="mono throttle-num"><span id="throttle-pct">0</span>%</span>
+      </div>
+      <div class="throttle-track">
+        <div id="throttle-fill" class="throttle-fill"></div>
+      </div>
+      <div class="throttle-hint">W 加大 · S 减小</div>
+    </div>
+
+    <!-- ---------- 底部中央：警告条 ---------- -->
+    <div id="warning"></div>
+
+    <!-- ---------- 中央大字反馈 ---------- -->
+    <div id="toast"></div>
+
+    <!-- ---------- 失速警告 ---------- -->
+    <div id="stall-bar"><span class="stall-text">⚠ 失速警告 · 速度过低请立即加油门并把机头压低</span></div>
+
+  </div>
+
+  <!-- ================= 开始 / 说明面板 ================= -->
+  <div id="menu" class="overlay hidden">
+    <div class="sheet">
+      <h1 class="title">✈️ 云端客机 · 飞行挑战</h1>
+      <p class="lede">
+        从机场跑道起飞 → 依次穿过 <b>3 个金色空中检查点</b> → 返回跑道平稳着陆。<br>
+        下面每一条按键都写清楚了，不熟悉飞行也能照着做。
+      </p>
+
+      <h2 class="sec-title">🕹 按键操作说明</h2>
+      <div class="table-wrap">
+        <table class="key-table">
+          <colgroup><col class="c-key"><col class="c-act"><col></colgroup>
+          <thead>
+            <tr><th>按键</th><th>作用</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="keys"><kbd>W</kbd> / <kbd>S</kbd></td>
+              <td>油门增减</td>
+              <td>按住持续加/减油门；<b>松手不会自动回中，油门会保持</b>。地面时决定加速快慢，空中时决定爬升快慢。</td>
+            </tr>
+            <tr>
+              <td class="keys"><kbd>↑</kbd> / <kbd>↓</kbd></td>
+              <td>俯仰（抬头 / 低头）</td>
+              <td>抬头 = 机头抬起、速度换高度；低头 = 机头压低、速度变快。<b>动作有惯性</b>，抬前轮要慢慢拉杆，太猛会把自己拉晕。</td>
+            </tr>
+            <tr>
+              <td class="keys"><kbd>←</kbd> / <kbd>→</kbd></td>
+              <td>横滚（压坡度）</td>
+              <td>压坡度 + 抬头才能转弯。压得太急，低速时会掉高度甚至失速。</td>
+            </tr>
+            <tr>
+              <td class="keys"><kbd>A</kbd> / <kbd>D</kbd></td>
+              <td>偏航（方向舵）</td>
+              <td>地面用来转向、对准跑道中线；空中用来小幅修正航向，不能代替转弯。</td>
+            </tr>
+            <tr>
+              <td class="keys"><kbd>空格</kbd></td>
+              <td>刹车</td>
+              <td>
+                地面 = 机轮刹车减速；<br>
+                空中 = 扰流器减速，<b>会增加阻力并损失升力</b>，<b>不会瞬间悬停</b>，仍要靠拉杆维持高度。
+              </td>
+            </tr>
+            <tr>
+              <td class="keys"><kbd>R</kbd></td>
+              <td>重新开始</td>
+              <td>随时可以重开一局。</td>
+            </tr>
+            <tr>
+              <td class="keys"><kbd>H</kbd> 或 <kbd>?</kbd></td>
+              <td>显示 / 隐藏本说明</td>
+              <td>飞行途中忘了按键可以随时呼出。</td>
+            </tr>
+            <tr>
+              <td class="keys"><kbd>Esc</kbd></td>
+              <td>返回主菜单</td>
+              <td>放弃本次飞行，回到说明页。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="sec-title">💡 起飞要领</h2>
+      <ol class="tips">
+        <li>用 <kbd>W</kbd> 把油门拉到最大，保持住别松。</li>
+        <li>等速度到 <b>250 km/h 以上</b>，轻轻拉 <kbd>↑</kbd> 抬头离地（约需滑跑 20 秒、700 米）。</li>
+        <li>爬升到 <b>300 m</b> 高度，对准第一个<b>金色圆环</b> 飞过去。</li>
+        <li>依次穿过 3 个圆环后，<b>对准跑道中线</b>，压一点坡度、轻轻带杆，稳稳落上去。</li>
+        <li>接地前把下沉率控制住（<b>越小越好，1 m/s 以内算平稳</b>），否则会判定重着陆失败。</li>
+      </ol>
+
+      <div class="btn-row">
+        <button id="btn-start" class="btn btn-primary" type="button">开始飞行</button>
+      </div>
+      <p class="tiny">操作说明也可在飞行中按 <kbd>H</kbd> 再次查看。</p>
+    </div>
+  </div>
+
+  <!-- ================= 结果面板 ================= -->
+  <div id="result" class="overlay hidden">
+    <div class="sheet">
+      <h1 id="result-title" class="title">飞行结果</h1>
+      <p id="result-reason" class="reason"></p>
+
+      <div class="stat-hero">
+        <span class="stat-hero-label">总耗时</span>
+        <span id="result-time" class="stat-hero-value mono">00:00.0</span>
+      </div>
+
+      <h2 class="sec-title">🚩 检查点通过情况</h2>
+      <div id="result-cp" class="cp-result-list"></div>
+
+      <h2 class="sec-title">🛬 着陆接地数据</h2>
+      <div id="result-landing" class="landing-box"></div>
+
+      <h2 class="sec-title">📌 改进建议</h2>
+      <ul id="result-tips" class="tips-list"></ul>
+
+      <div class="btn-row">
+        <button id="btn-restart" class="btn btn-primary" type="button">再飞一次</button>
+        <button id="btn-menu" class="btn btn-ghost" type="button">返回主菜单</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 加载遮罩 ================= -->
+  <div id="loading">
+    <div class="load-box">
+      <div class="load-plane">✈️</div>
+      <div class="load-text">正在生成机场与航路…</div>
+      <div class="load-bar"><div class="load-bar-fill"></div></div>
+      <div class="load-tiny">首次进入需要几秒钟，请稍候</div>
+    </div>
+  </div>
+
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

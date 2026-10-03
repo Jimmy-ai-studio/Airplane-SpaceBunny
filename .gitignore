@@ -1,0 +1,19 @@
+# 依赖（测试用，游戏本体不需要）
+node_modules/
+package-lock.json
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# 日志
+*.log
+npm-debug.log*
+
+# 临时截图（测试过程产物）
+shots/_*.png
+shots/*-stuck-*.png
+shots/e2e-report.json
