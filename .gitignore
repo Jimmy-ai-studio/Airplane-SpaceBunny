@@ -17,3 +17,7 @@ npm-debug.log*
 shots/_*.png
 shots/*-stuck-*.png
 shots/e2e-report.json
+
+# 线上验证脚本依赖特定本机代理环境，对他人无意义
+tools/verify-online.mjs
+tools/preflight.mjs
