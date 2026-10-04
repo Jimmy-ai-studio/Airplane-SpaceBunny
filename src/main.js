@@ -15,6 +15,7 @@ import { createEnvironment, terrainHeight } from './world/environment.js';
 import { createAircraft } from './world/craft.js';
 import { createCheckpoints } from './world/checkpoints.js';
 import { createHUD } from './ui/hud.js';
+import { createAudio } from './systems/audio.js';
 
 const DEG = Math.PI / 180;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -41,6 +42,10 @@ class Game {
     this.hud.onStart(() => this.start());
     this.hud.onRestart(() => this.restart());
     this.hud.onMenu(() => this.toMenu());
+
+    // 音频（全部由 Web Audio 实时合成，无外部素材文件）
+    this.audio = createAudio();
+    this.audio.bindVisibility();
 
     this._bindGlobalKeys();
 
@@ -98,6 +103,11 @@ class Game {
       if (e.code === 'KeyR') { this.restart(); }
       else if (e.code === 'Escape') { this.toMenu(); }
       else if (e.code === 'KeyH' || e.code === 'Slash') { this.hud.toggleHelp?.(); }
+      else if (e.code === 'KeyM') {
+        // 静音开关
+        const muted = this.audio.toggleMute();
+        this.hud.toast(muted ? '🔇 已静音' : '🔊 声音已开启', 1400);
+      }
     });
   }
 
@@ -120,23 +130,30 @@ class Game {
   }
 
   start() {
+    // 浏览器自动播放策略：AudioContext 必须在用户手势里解锁
+    this.audio.unlock();
+    this.audio.resumeEngine();
     this.reset();
     this.phase = PHASE.READY;
     this.hud.hideMenu();
     this.hud.hideResult();
     this.hud.setPhase(this.phase);
     this.hud.toast('推油门到最大，速度到 250 km/h 以上轻轻拉杆抬轮', 4200);
+    this.audio.play('engineStart');
   }
 
   restart() {
+    this.audio.play('restart');
     this.start();
   }
 
   toMenu() {
     this.phase = PHASE.MENU;
     this.reset();
+    this.audio.silenceEngine();
     this.hud.hideResult();
     this.hud.showMenu();
+    this.audio.play('uiClick');
   }
 
   // ---------------- 胜负判定 ----------------
@@ -148,6 +165,11 @@ class Game {
     this.hud.flashFail();
     this.hud.setWarning(FAIL_REASON[reason] || reason);
     this.hud.showResult(this._buildResult(false, reason));
+    // 坠毁类用爆裂音，其他判定失败用下行音
+    if (reason === FAIL_REASON.CRASH_GROUND) this.audio.play('crash');
+    else if (reason === FAIL_REASON.HARD_LANDING) this.audio.play('hardLanding');
+    else this.audio.play('fail');
+    this.audio.silenceEngine();
   }
 
   _succeed() {
@@ -157,6 +179,8 @@ class Game {
     this.hud.setWarning(null);
     this.cps.celebrateAll();
     this.hud.showResult(this._buildResult(true, null));
+    this.audio.play('success');
+    this.audio.silenceEngine();
   }
 
   _buildResult(success, reason) {
@@ -281,6 +305,7 @@ class Game {
     this.hud.setPhase(this.phase);
     const grade = td.sink < 0.5 && td.speed < P.goodLandingSpeed ? '优秀着陆 🌟' : '着陆成功 ✅';
     this.hud.toast(`${grade}　接地速度 ${(td.speed * 3.6).toFixed(0)} km/h，下沉率 ${td.sink.toFixed(2)} m/s`, 4200);
+    this.audio.play('touchdown');
   }
 
   /** 检查点滑行停止 → 成功 */
@@ -365,6 +390,7 @@ class Game {
         this.phase = PHASE.FLYING;
         this.hud.setPhase(this.phase);
         this.takeoffTime = this.timer;
+        this.audio.play('takeoff');
       }
       if (this.phase === PHASE.FLYING || this.phase === PHASE.READY || this.phase === PHASE.LANDED) {
         this.timer += dt;
@@ -422,10 +448,13 @@ class Game {
           if (this.cpIndex >= CHECKPOINTS.length) {
             this.hud.toast('三个检查点全部通过！现在返场着陆 🛬', 4600);
             this.hud.setWarning('返场着陆：把机头对准跑道中线');
+            this.audio.play('allCheckpoints');
           } else {
             const nxt = CHECKPOINTS[this.cpIndex];
             this.hud.toast(`检查点 ${this.cpIndex} / 3 通过`, 2200);
             this.hud.setWarning(`下一个：检查点 ${nxt.id}（${nxt.label}）`);
+            // 音高随序号递增，给玩家「进度推进」的听感
+            this.audio.play('checkpoint', this.cpIndex - 1);
           }
         }
       }
@@ -517,6 +546,18 @@ class Game {
       this.cpIndex
     );
     this.hud.drawAttitude(m.pitch / DEG, -m.roll / DEG, m.headingDeg);
+
+    // 音频每帧驱动：发动机/风噪持续音 + 失速/超速警报。
+    // 终局时把油门/速度归零，让引擎声自然淡出而不是硬切。
+    const ended = this.phase === PHASE.FAILED || this.phase === PHASE.SUCCESS || this.phase === PHASE.MENU;
+    this.audio.update({
+      throttle: ended ? 0 : m.throttle,
+      speed: ended ? 0 : m.speed,
+      onGround: m.onGround,
+      stall: ended ? false : m.stall,
+      kmh: ended ? 0 : m.speed * 3.6,
+      altitude: m.pos.y - WORLD.runwayY,
+    });
   }
 }
 
